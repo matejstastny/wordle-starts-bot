@@ -14,6 +14,7 @@ TOKEN = os.environ["DISCORD_TOKEN"]
 WORDLE_CHANNEL_ID = int(os.environ["WORDLE_CHANNEL_ID"])
 LEADERBOARD_CHANNEL_ID = int(os.environ["LEADERBOARD_CHANNEL_ID"])
 WORDLE_BOT_NAME = os.getenv("WORDLE_BOT_NAME", "Wordle")
+MOD_ROLE = os.getenv("MOD_ROLE", "Program Staff")
 MIN_GAMES = int(os.getenv("MIN_GAMES", "5"))
 TOP_N = int(os.getenv("TOP_N", "7"))
 POST_HOUR_UTC = int(os.getenv("POST_HOUR_UTC", "9"))
@@ -57,6 +58,8 @@ async def on_ready():
     print(f"Logged in as {bot.user} (ID: {bot.user.id})")
     init_db()
     monthly_post.start()
+    await bot.tree.sync()
+    print("Slash commands synced")
 
 
 @bot.event
@@ -93,6 +96,26 @@ async def cmd_leaderboard(ctx, month: str = None):
         now = datetime.now(timezone.utc)
         month = (now.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
     await ctx.send(build_leaderboard_message(month))
+
+
+def is_mod(interaction: discord.Interaction) -> bool:
+    return any(r.name == MOD_ROLE for r in interaction.user.roles)
+
+
+@bot.tree.command(name="leaderboard", description="Show the Wordle leaderboard (Program Staff only)")
+@discord.app_commands.describe(month="Month to show (YYYY-MM). Defaults to current month.")
+async def slash_leaderboard(interaction: discord.Interaction, month: str = None):
+    if not is_mod(interaction):
+        await interaction.response.send_message("You need the Program Staff role to use this command.", ephemeral=True)
+        return
+    if interaction.channel_id != LEADERBOARD_CHANNEL_ID:
+        await interaction.response.send_message(
+            f"This command only works in <#{LEADERBOARD_CHANNEL_ID}>.", ephemeral=True
+        )
+        return
+    if month is None:
+        month = datetime.now(timezone.utc).strftime("%Y-%m")
+    await interaction.response.send_message(build_leaderboard_message(month))
 
 
 @bot.command(name="backfill")
