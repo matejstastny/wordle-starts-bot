@@ -113,7 +113,8 @@ async def slash_leaderboard(interaction: discord.Interaction, month: str = None)
         )
         return
     if month is None:
-        month = datetime.now(timezone.utc).strftime("%Y-%m")
+        now = datetime.now(timezone.utc)
+        month = (now.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
     await interaction.response.send_message(build_leaderboard_message(month))
 
 
