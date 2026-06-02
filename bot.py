@@ -130,9 +130,11 @@ async def cmd_backfill(ctx, limit: int = 1000):
     await ctx.send(f"Scanning up to {limit} messages in <#{WORDLE_CHANNEL_ID}>...")
 
     recorded_total = 0
+    bot_names_seen = set()
     async for message in channel.history(limit=limit, oldest_first=True):
         if not message.author.bot:
             continue
+        bot_names_seen.add(message.author.name)
         if WORDLE_BOT_NAME.lower() not in message.author.name.lower():
             continue
         if "yesterday's results" not in message.content.lower():
@@ -145,7 +147,8 @@ async def cmd_backfill(ctx, limit: int = 1000):
             if add_score(player_id, player_name, guesses, game_date):
                 recorded_total += 1
 
-    await ctx.send(f"Done! Imported {recorded_total} new score entries.")
+    names_str = ", ".join(f"`{n}`" for n in sorted(bot_names_seen)) or "none"
+    await ctx.send(f"Done! Imported {recorded_total} new score entries.\nBot names seen in channel: {names_str}")
 
 
 @tasks.loop(hours=1)
