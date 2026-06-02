@@ -71,14 +71,18 @@ async def on_message(message: discord.Message):
         return
     if WORDLE_BOT_NAME.lower() not in message.author.name.lower():
         return
-    if "yesterday" not in message.content.lower():
+    text = message.content
+    if not text and message.embeds:
+        text = message.embeds[0].description or ""
+
+    if "yesterday" not in text.lower():
         return
 
     # The summary always refers to the previous day's games
     game_date = message.created_at.date() - timedelta(days=1)
     mentions_map = {str(m.id): m.display_name for m in message.mentions}
 
-    scores = parse_daily_summary(message.content, mentions_map)
+    scores = parse_daily_summary(text, mentions_map)
     recorded = sum(
         1
         for player_id, player_name, guesses in scores
@@ -130,25 +134,38 @@ async def cmd_backfill(ctx, limit: int = 1000):
     await ctx.send(f"Scanning up to {limit} messages in <#{WORDLE_CHANNEL_ID}>...")
 
     recorded_total = 0
-    bot_names_seen = set()
+    wordle_total = 0
+    sample_content = None
+    sample_embed = None
     async for message in channel.history(limit=limit, oldest_first=True):
         if not message.author.bot:
             continue
-        bot_names_seen.add(message.author.name)
         if WORDLE_BOT_NAME.lower() not in message.author.name.lower():
             continue
-        if "yesterday" not in message.content.lower():
+        wordle_total += 1
+        if wordle_total == 1:
+            sample_content = repr(message.content[:200]) if message.content else "EMPTY"
+            sample_embed = repr(message.embeds[0].description[:200]) if message.embeds and message.embeds[0].description else "NO EMBED"
+
+        text = message.content
+        if not text and message.embeds:
+            text = message.embeds[0].description or ""
+
+        if "yesterday" not in text.lower():
             continue
 
         game_date = message.created_at.date() - timedelta(days=1)
         mentions_map = {str(m.id): m.display_name for m in message.mentions}
-        scores = parse_daily_summary(message.content, mentions_map)
+        scores = parse_daily_summary(text, mentions_map)
         for player_id, player_name, guesses in scores:
             if add_score(player_id, player_name, guesses, game_date):
                 recorded_total += 1
 
-    names_str = ", ".join(f"`{n}`" for n in sorted(bot_names_seen)) or "none"
-    await ctx.send(f"Done! Imported {recorded_total} new score entries.\nBot names seen in channel: {names_str}")
+    await ctx.send(
+        f"Done! Imported {recorded_total} entries from {wordle_total} Wordle messages.\n"
+        f"Sample content: {sample_content}\n"
+        f"Sample embed: {sample_embed}"
+    )
 
 
 @tasks.loop(hours=1)
