@@ -67,7 +67,7 @@ async def on_message(message: discord.Message):
 
     if message.channel.id != WORDLE_CHANNEL_ID:
         return
-    if not message.author.bot:
+    if not message.author.bot and not message.webhook_id:
         return
     if WORDLE_BOT_NAME.lower() not in message.author.name.lower():
         return
@@ -138,7 +138,7 @@ async def cmd_backfill(ctx, limit: int = 1000):
     sample_content = None
     sample_embed = None
     async for message in channel.history(limit=limit, oldest_first=True):
-        if not message.author.bot:
+        if not message.author.bot and not message.webhook_id:
             continue
         if WORDLE_BOT_NAME.lower() not in message.author.name.lower():
             continue
