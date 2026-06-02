@@ -133,26 +133,44 @@ async def cmd_backfill(ctx, limit: int = 1000):
 
     await ctx.send(f"Scanning up to {limit} messages in <#{WORDLE_CHANNEL_ID}>...")
 
+    total = 0
+    non_human = 0
+    name_matched = 0
+    had_yesterday = 0
     recorded_total = 0
-    wordle_total = 0
-    sample_content = None
-    sample_embed = None
+    all_author_names = set()
+
     async for message in channel.history(limit=limit, oldest_first=True):
-        if not message.author.bot and not message.webhook_id:
+        total += 1
+
+        is_bot = message.author.bot
+        is_webhook = bool(message.webhook_id)
+        author_name = message.author.name
+
+        if not is_bot and not is_webhook:
             continue
-        if WORDLE_BOT_NAME.lower() not in message.author.name.lower():
+        non_human += 1
+        all_author_names.add(f"{author_name}(bot={is_bot},wh={is_webhook})")
+
+        if WORDLE_BOT_NAME.lower() not in author_name.lower():
             continue
-        wordle_total += 1
-        if wordle_total == 1:
-            sample_content = repr(message.content[:200]) if message.content else "EMPTY"
-            sample_embed = repr(message.embeds[0].description[:200]) if message.embeds and message.embeds[0].description else "NO EMBED"
+        name_matched += 1
 
         text = message.content
         if not text and message.embeds:
             text = message.embeds[0].description or ""
 
+        if name_matched <= 2:
+            await ctx.send(
+                f"**Message #{name_matched} from `{author_name}`**\n"
+                f"bot={is_bot} webhook={is_webhook}\n"
+                f"content={repr(message.content[:150])}\n"
+                f"embeds={len(message.embeds)} | text={repr(text[:150])}"
+            )
+
         if "yesterday" not in text.lower():
             continue
+        had_yesterday += 1
 
         game_date = message.created_at.date() - timedelta(days=1)
         mentions_map = {str(m.id): m.display_name for m in message.mentions}
@@ -161,10 +179,15 @@ async def cmd_backfill(ctx, limit: int = 1000):
             if add_score(player_id, player_name, guesses, game_date):
                 recorded_total += 1
 
+    names_str = ", ".join(f"`{n}`" for n in sorted(all_author_names)) or "none"
     await ctx.send(
-        f"Done! Imported {recorded_total} entries from {wordle_total} Wordle messages.\n"
-        f"Sample content: {sample_content}\n"
-        f"Sample embed: {sample_embed}"
+        f"**Backfill complete**\n"
+        f"Total messages scanned: {total}\n"
+        f"Non-human (bot/webhook): {non_human}\n"
+        f"Matched name `{WORDLE_BOT_NAME}`: {name_matched}\n"
+        f"Had 'yesterday': {had_yesterday}\n"
+        f"Imported: {recorded_total}\n"
+        f"All non-human authors: {names_str}"
     )
 
 
