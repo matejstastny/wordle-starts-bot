@@ -71,7 +71,7 @@ async def on_message(message: discord.Message):
         return
     if WORDLE_BOT_NAME.lower() not in message.author.name.lower():
         return
-    if "yesterday's results" not in message.content.lower():
+    if "yesterday" not in message.content.lower():
         return
 
     # The summary always refers to the previous day's games
@@ -137,7 +137,7 @@ async def cmd_backfill(ctx, limit: int = 1000):
         bot_names_seen.add(message.author.name)
         if WORDLE_BOT_NAME.lower() not in message.author.name.lower():
             continue
-        if "yesterday's results" not in message.content.lower():
+        if "yesterday" not in message.content.lower():
             continue
 
         game_date = message.created_at.date() - timedelta(days=1)
