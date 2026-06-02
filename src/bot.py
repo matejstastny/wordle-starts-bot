@@ -1,12 +1,11 @@
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import discord
 from discord.ext import commands, tasks
 from dotenv import load_dotenv
-
-from database import add_score, get_leaderboard, has_been_posted, init_db, mark_posted
-from parser import parse_daily_summary
+from src.database import add_score, get_leaderboard, has_been_posted, init_db, mark_posted
+from src.parser import parse_daily_summary
 
 load_dotenv()
 
@@ -36,18 +35,18 @@ def build_leaderboard_message(year_month: str) -> str:
 
     if not rows:
         return (
-            f"🏆 **Wordle Leaderboard — {month_name}**\n\n"
+            f"**Wordle Leaderboard - {month_name}**\n\n"
             f"No qualifying players yet (minimum {MIN_GAMES} games required)."
         )
 
     medals = ["🥇", "🥈", "🥉"]
     lines = [
-        f"🏆 **Wordle Leaderboard — {month_name}** 🏆",
+        f"**Wordle Leaderboard - {month_name}** 🏆",
         f"*Ranked by avg guesses • minimum {MIN_GAMES} games to qualify • X/6 = 7*\n",
     ]
     for i, (name, avg, games) in enumerate(rows, start=1):
         prefix = medals[i - 1] if i <= 3 else f"**{i}.**"
-        lines.append(f"{prefix} {name} — `{avg:.2f}` avg ({games} games)")
+        lines.append(f"{prefix} {name} - `{avg:.2f}` avg ({games} games)")
 
     return "\n".join(lines)
 
@@ -96,7 +95,7 @@ async def on_message(message: discord.Message):
 async def cmd_leaderboard(ctx, month: str = None):
     """Post leaderboard for a given month (YYYY-MM). Defaults to last month."""
     if month is None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         month = (now.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
     await ctx.send(build_leaderboard_message(month))
 
@@ -105,11 +104,15 @@ def is_mod(interaction: discord.Interaction) -> bool:
     return any(r.name == MOD_ROLE for r in interaction.user.roles)
 
 
-@bot.tree.command(name="leaderboard", description="Show the Wordle leaderboard (Program Staff only)")
+@bot.tree.command(
+    name="leaderboard", description="Show the Wordle leaderboard (Program Staff only)"
+)
 @discord.app_commands.describe(month="Month to show (YYYY-MM). Defaults to current month.")
 async def slash_leaderboard(interaction: discord.Interaction, month: str = None):
     if not is_mod(interaction):
-        await interaction.response.send_message("You need the Program Staff role to use this command.", ephemeral=True)
+        await interaction.response.send_message(
+            "You need the Program Staff role to use this command.", ephemeral=True
+        )
         return
     if interaction.channel_id != LEADERBOARD_CHANNEL_ID:
         await interaction.response.send_message(
@@ -117,9 +120,33 @@ async def slash_leaderboard(interaction: discord.Interaction, month: str = None)
         )
         return
     if month is None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         month = (now.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
     await interaction.response.send_message(build_leaderboard_message(month))
+
+
+@bot.command(name="debug")
+@commands.has_permissions(administrator=True)
+async def cmd_debug(ctx):
+    """Show raw content of the last 3 Wordle daily summary messages."""
+    channel = bot.get_channel(WORDLE_CHANNEL_ID)
+    found = 0
+    async for message in channel.history(limit=500):
+        if not message.author.bot and not message.webhook_id:
+            continue
+        if WORDLE_BOT_NAME.lower() not in message.author.name.lower():
+            continue
+        text = message.content
+        if not text and message.embeds:
+            text = message.embeds[0].description or ""
+        if "yesterday" not in text.lower():
+            continue
+        await ctx.send(f"**Raw message (repr):**\n```\n{repr(text[:800])}\n```")
+        found += 1
+        if found >= 3:
+            break
+    if found == 0:
+        await ctx.send("No matching messages found.")
 
 
 @bot.command(name="backfill")
@@ -193,7 +220,7 @@ async def cmd_backfill(ctx, limit: int = 1000):
 
 @tasks.loop(hours=1)
 async def monthly_post():
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     if now.day != 1 or now.hour != POST_HOUR_UTC:
         return
 

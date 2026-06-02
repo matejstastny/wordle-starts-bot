@@ -30,7 +30,8 @@ def add_score(player_id: str, player_name: str, guesses: int, game_date: date) -
     with sqlite3.connect(DB_FILE) as conn:
         try:
             conn.execute(
-                "INSERT INTO scores (player_id, player_name, guesses, game_date, year_month) VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO scores (player_id, player_name, guesses, game_date, year_month)"
+                " VALUES (?, ?, ?, ?, ?)",
                 (player_id, player_name, guesses, game_date.isoformat(), year_month),
             )
             return True
@@ -57,13 +58,14 @@ def get_leaderboard(year_month: str, min_games: int = 5, top_n: int = 7) -> list
 
 def has_been_posted(year_month: str) -> bool:
     with sqlite3.connect(DB_FILE) as conn:
-        return conn.execute(
-            "SELECT 1 FROM posted_months WHERE year_month = ?", (year_month,)
-        ).fetchone() is not None
+        return (
+            conn.execute(
+                "SELECT 1 FROM posted_months WHERE year_month = ?", (year_month,)
+            ).fetchone()
+            is not None
+        )
 
 
 def mark_posted(year_month: str):
     with sqlite3.connect(DB_FILE) as conn:
-        conn.execute(
-            "INSERT OR IGNORE INTO posted_months (year_month) VALUES (?)", (year_month,)
-        )
+        conn.execute("INSERT OR IGNORE INTO posted_months (year_month) VALUES (?)", (year_month,))

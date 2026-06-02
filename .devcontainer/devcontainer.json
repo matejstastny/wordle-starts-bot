@@ -1,0 +1,17 @@
+{
+    "name": "Wordle Bot",
+    "image": "mcr.microsoft.com/devcontainers/python:3.13",
+    "postCreateCommand": "pip install -r requirements.txt ruff",
+    "customizations": {
+        "vscode": {
+            "extensions": ["ms-python.python", "charliermarsh.ruff"],
+            "settings": {
+                "editor.formatOnSave": true,
+                "editor.defaultFormatter": "charliermarsh.ruff",
+                "[python]": {
+                    "editor.defaultFormatter": "charliermarsh.ruff"
+                }
+            }
+        }
+    }
+}

@@ -1,13 +1,12 @@
 import re
-from typing import Dict, List, Tuple
 
-# Matches lines like: "👑 3/6: <@123>" or "X/6: <@456> <@789>" or "4/6: @Cinnamon <@111>"
-SCORE_LINE = re.compile(r'^[👑\s]*([1-6X])/6:\s*(.+)', re.UNICODE)
-DISCORD_MENTION = re.compile(r'<@!?(\d+)>')
-PLAIN_MENTION = re.compile(r'@([^\s<@>]+)')
+# Matches lines like: "👑 3/6: <@123>" or "X/6: <@456> <@789>" or "4/6: @Anon <@111>"
+SCORE_LINE = re.compile(r"^[👑\s]*([1-6X])/6:\s*(.+)", re.UNICODE)
+DISCORD_MENTION = re.compile(r"<@!?(\d+)>")
+PLAIN_MENTION = re.compile(r"@([^\s<@>]+)")
 
 
-def parse_daily_summary(content: str, mentions_map: Dict[str, str]) -> List[Tuple[str, str, int]]:
+def parse_daily_summary(content: str, mentions_map: dict[str, str]) -> list[tuple[str, str, int]]:
     """
     Parse a Wordle APP daily summary message.
     Handles both Discord mentions (<@ID>) and plain-text mentions (@Name).
@@ -28,7 +27,7 @@ def parse_daily_summary(content: str, mentions_map: Dict[str, str]) -> List[Tupl
             player_name = mentions_map.get(player_id, f"Unknown ({player_id})")
             results.append((player_id, player_name, guesses))
 
-        # Plain-text mentions: @Cinnamon (after removing Discord mentions to avoid double-counting)
+        # Plain-text mentions: @Anon
         remaining = DISCORD_MENTION.sub("", players_str)
         for match in PLAIN_MENTION.finditer(remaining):
             name = match.group(1)
