@@ -152,13 +152,13 @@ async def cmd_debug(ctx):
 @bot.command(name="backfill")
 @commands.has_permissions(administrator=True)
 async def cmd_backfill(ctx, limit: int = 30):
-    """Scan the last <limit> messages in #wordle and import historical scores."""
+    """Scan back until <limit> daily summary messages are found and import their scores."""
     channel = bot.get_channel(WORDLE_CHANNEL_ID)
     if channel is None:
         await ctx.send("Wordle channel not found. Check WORDLE_CHANNEL_ID.")
         return
 
-    await ctx.send(f"Scanning up to {limit} messages in <#{WORDLE_CHANNEL_ID}>...")
+    await ctx.send(f"Scanning back for {limit} daily summaries in <#{WORDLE_CHANNEL_ID}>...")
 
     total = 0
     non_human = 0
@@ -167,7 +167,7 @@ async def cmd_backfill(ctx, limit: int = 30):
     recorded_total = 0
     all_author_names = set()
 
-    async for message in channel.history(limit=limit, oldest_first=True):
+    async for message in channel.history(limit=None):
         total += 1
 
         is_bot = message.author.bot
@@ -202,7 +202,7 @@ async def cmd_backfill(ctx, limit: int = 30):
         game_date = message.created_at.date() - timedelta(days=1)
         mentions_map = {str(m.id): m.display_name for m in message.mentions}
         scores = parse_daily_summary(text, mentions_map)
-        lines = [f"--- DATA ({message.jump_url}) ---"]
+        lines = [f"--- {game_date} ({message.jump_url}) ---"]
         for player_id, player_name, guesses in scores:
             score = "X/6" if guesses == 7 else f"{guesses}/6"
             lines.append(f"  {score}  {player_name} (id: {player_id})")
@@ -210,6 +210,9 @@ async def cmd_backfill(ctx, limit: int = 30):
         for player_id, player_name, guesses in scores:
             if add_score(player_id, player_name, guesses, game_date):
                 recorded_total += 1
+
+        if had_yesterday >= limit:
+            break
 
     names_str = ", ".join(f"`{n}`" for n in sorted(all_author_names)) or "none"
     await ctx.send(
