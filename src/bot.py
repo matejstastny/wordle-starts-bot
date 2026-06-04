@@ -121,10 +121,10 @@ async def on_message(message: discord.Message):
 @bot.command(name="leaderboard")
 @commands.has_permissions(administrator=True)
 async def cmd_leaderboard(ctx, month: str = None):
-    """Post leaderboard. No arg = last 3 months combined. Optional YYYY-MM must be within 3 months."""
+    """Post leaderboard. No arg = last month only. Optional YYYY-MM must be within 3 months."""
     valid = valid_months_window()
     if month is None:
-        await ctx.send(build_leaderboard_message(valid))
+        await ctx.send(build_leaderboard_message([valid[0]]))
     else:
         if month not in valid:
             await ctx.send(f"Month `{month}` is outside the allowed window. Valid: {', '.join(valid)}")
@@ -139,7 +139,7 @@ def is_mod(interaction: discord.Interaction) -> bool:
 @bot.tree.command(
     name="leaderboard", description="Show the Wordle leaderboard (Program Staff only)"
 )
-@discord.app_commands.describe(month="Month to show (YYYY-MM). Defaults to last 3 months combined.")
+@discord.app_commands.describe(month="Month to show (YYYY-MM). Defaults to last month.")
 async def slash_leaderboard(interaction: discord.Interaction, month: str = None):
     if not is_mod(interaction):
         await interaction.response.send_message(
@@ -152,40 +152,121 @@ async def slash_leaderboard(interaction: discord.Interaction, month: str = None)
         )
         return
     valid = valid_months_window()
-    if month is None:
-        await interaction.response.send_message(build_leaderboard_message(valid))
-    else:
-        if month not in valid:
-            await interaction.response.send_message(
-                f"Month `{month}` is outside the allowed 3-month window. Valid: {', '.join(valid)}",
-                ephemeral=True,
-            )
-            return
-        await interaction.response.send_message(build_leaderboard_message([month]))
+    target_month = month or valid[0]
+
+    if target_month not in valid:
+        await interaction.response.send_message(
+            f"Month `{target_month}` is outside the allowed 3-month window. Valid: {', '.join(valid)}",
+            ephemeral=True,
+        )
+        return
+
+    month_name = datetime.strptime(target_month, "%Y-%m").strftime("%B %Y")
+    await interaction.response.send_message(f"Loading data for {month_name}...")
+    await interaction.followup.send(build_leaderboard_message([target_month]))
 
 
 @bot.command(name="debug")
 @commands.has_permissions(administrator=True)
-async def cmd_debug(ctx):
-    """Show raw content of the last 3 Wordle daily summary messages."""
+async def cmd_debug(ctx, month_num: int = None):
+    """Scan a month's Wordle messages and DM per-day breakdown. No DB writes."""
+    valid = valid_months_window()
+    if month_num is None:
+        await ctx.send(
+            f"Usage: `!debug <month>` (month number, e.g. `!debug 5`)\n"
+            f"Valid months: {', '.join(valid)}"
+        )
+        return
+
+    target_ym = month_num_to_year_month(month_num)
+    if target_ym is None:
+        await ctx.send(
+            f"Month `{month_num}` is not within the allowed 3-month window. Valid: {', '.join(valid)}"
+        )
+        return
+
+    month_name = datetime.strptime(target_ym, "%Y-%m").strftime("%B %Y")
     channel = bot.get_channel(WORDLE_CHANNEL_ID)
-    found = 0
-    async for message in channel.history(limit=500):
-        if not message.author.bot and not message.webhook_id:
+    if channel is None:
+        await ctx.send("Wordle channel not found. Check WORDLE_CHANNEL_ID.")
+        return
+
+    total = 0
+    name_matched = 0
+    had_yesterday = 0
+    daily_groups = {}
+
+    async for message in channel.history(limit=None):
+        total += 1
+
+        msg_ym = message.created_at.strftime("%Y-%m")
+        if msg_ym < target_ym:
+            break
+        if msg_ym != target_ym:
             continue
-        if WORDLE_BOT_NAME.lower() not in message.author.name.lower():
+
+        is_bot = message.author.bot
+        is_webhook = bool(message.webhook_id)
+        author_name = message.author.name
+
+        if not is_bot and not is_webhook:
             continue
+
+        if WORDLE_BOT_NAME.lower() not in author_name.lower():
+            continue
+        name_matched += 1
+
         text = message.content
         if not text and message.embeds:
             text = message.embeds[0].description or ""
+
         if "yesterday" not in text.lower():
             continue
-        await ctx.send(f"**Raw message (repr):**\n```\n{repr(text[:800])}\n```")
-        found += 1
-        if found >= 3:
-            break
-    if found == 0:
-        await ctx.send("No matching messages found.")
+        had_yesterday += 1
+
+        game_date = message.created_at.date() - timedelta(days=1)
+        if game_date.strftime("%Y-%m") != target_ym:
+            continue
+
+        mentions_map = {str(m.id): m.display_name for m in message.mentions}
+        scores = parse_daily_summary(text, mentions_map)
+
+        if game_date not in daily_groups:
+            daily_groups[game_date] = (message.jump_url, [])
+        daily_groups[game_date][1].extend(scores)
+
+    # Build per-day blocks, then send in DM chunks that fit under Discord's 2000-char limit
+    day_blocks = []
+    for game_date in sorted(daily_groups.keys()):
+        jump_url, scores = daily_groups[game_date]
+        block_lines = [f"--- {game_date} ({jump_url}) ---"]
+        for player_id, player_name, guesses in scores:
+            score = "X/6" if guesses == 7 else f"{guesses}/6"
+            block_lines.append(f"  {score}  {player_name} (id: {player_id})")
+        day_blocks.append("\n".join(block_lines))
+
+    summary = (
+        f"Debug complete — {month_name}\n"
+        f"Messages scanned: {total} | Matched Wordle bot: {name_matched} | Had 'yesterday': {had_yesterday}"
+    )
+
+    try:
+        dm = await ctx.author.create_dm()
+        await dm.send(f"Scanning {month_name} in <#{WORDLE_CHANNEL_ID}>...\n")
+        chunk = []
+        chunk_len = 0
+        for block in day_blocks:
+            if chunk_len + len(block) + 2 > 1900:
+                await dm.send("\n\n".join(chunk))
+                chunk = []
+                chunk_len = 0
+            chunk.append(block)
+            chunk_len += len(block) + 2
+        if chunk:
+            await dm.send("\n\n".join(chunk))
+        await dm.send(summary)
+    except discord.Forbidden:
+        await ctx.send("❌ Couldn't DM you — enable DMs from server members.")
 
 
 @bot.command(name="backfill")
@@ -252,14 +333,6 @@ async def cmd_backfill(ctx, *month_args: int):
         if not text and message.embeds:
             text = message.embeds[0].description or ""
 
-        if name_matched <= 2:
-            await ctx.send(
-                f"**Message #{name_matched} from `{author_name}`**\n"
-                f"bot={is_bot} webhook={is_webhook}\n"
-                f"content={repr(message.content[:150])}\n"
-                f"embeds={len(message.embeds)} | text={repr(text[:150])}"
-            )
-
         if "yesterday" not in text.lower():
             continue
         had_yesterday += 1
@@ -272,11 +345,6 @@ async def cmd_backfill(ctx, *month_args: int):
 
         mentions_map = {str(m.id): m.display_name for m in message.mentions}
         scores = parse_daily_summary(text, mentions_map)
-        lines = [f"--- {game_date} ({message.jump_url}) ---"]
-        for player_id, player_name, guesses in scores:
-            score = "X/6" if guesses == 7 else f"{guesses}/6"
-            lines.append(f"  {score}  {player_name} (id: {player_id})")
-        await ctx.send("\n".join(lines))
         for player_id, player_name, guesses in scores:
             if add_score(player_id, player_name, guesses, game_date):
                 recorded_total += 1
@@ -292,6 +360,36 @@ async def cmd_backfill(ctx, *month_args: int):
         f"Imported: {recorded_total}\n"
         f"All non-human authors: {names_str}"
     )
+
+
+@bot.command(name="wipe")
+@commands.has_permissions(administrator=True)
+async def cmd_wipe(ctx):
+    """Purge all messages from the leaderboard channel. Only works when called from leaderboard channel."""
+    if ctx.channel.id != LEADERBOARD_CHANNEL_ID:
+        try:
+            await ctx.author.send(f"❌ !wipe can only be used inside <#{LEADERBOARD_CHANNEL_ID}>.")
+        except discord.Forbidden:
+            pass
+        return
+
+    channel = bot.get_channel(LEADERBOARD_CHANNEL_ID)
+    if channel is None:
+        await ctx.send("Leaderboard channel not found. Check LEADERBOARD_CHANNEL_ID.")
+        return
+
+    deleted = 0
+    async for msg in channel.history(limit=None):
+        try:
+            await msg.delete()
+            deleted += 1
+        except discord.NotFound:
+            pass
+
+    try:
+        await ctx.author.send(f"✅ Wiped <#{LEADERBOARD_CHANNEL_ID}> — {deleted} messages deleted.")
+    except discord.Forbidden:
+        pass
 
 
 @tasks.loop(hours=1)
