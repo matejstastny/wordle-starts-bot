@@ -24,24 +24,52 @@ intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 
-def build_leaderboard_message(year_month: str) -> str:
-    try:
-        dt = datetime.strptime(year_month, "%Y-%m")
-    except ValueError:
-        return f"Invalid month: {year_month}"
+def valid_months_window() -> list[str]:
+    """Return YYYY-MM strings for the 3 calendar months before the current month."""
+    today = datetime.now(UTC).date()
+    months = []
+    d = today.replace(day=1)
+    for _ in range(3):
+        d -= timedelta(days=1)
+        months.append(d.strftime("%Y-%m"))
+        d = d.replace(day=1)
+    return months
 
-    month_name = dt.strftime("%B %Y")
-    rows = get_leaderboard(year_month, min_games=MIN_GAMES, top_n=TOP_N)
+
+def month_num_to_year_month(month_num: int) -> str | None:
+    """Convert a month number (1-12) to YYYY-MM if within the 3-month window, else None."""
+    for ym in valid_months_window():
+        if int(ym[5:7]) == month_num:
+            return ym
+    return None
+
+
+def build_leaderboard_message(year_months: list[str]) -> str:
+    month_names = []
+    for ym in year_months:
+        try:
+            month_names.append(datetime.strptime(ym, "%Y-%m").strftime("%B %Y"))
+        except ValueError:
+            return f"Invalid month: {ym}"
+
+    if len(month_names) == 1:
+        label = month_names[0]
+    elif len(month_names) == 2:
+        label = " & ".join(month_names)
+    else:
+        label = ", ".join(month_names[:-1]) + " & " + month_names[-1]
+
+    rows = get_leaderboard(year_months, min_games=MIN_GAMES, top_n=TOP_N)
 
     if not rows:
         return (
-            f"**Wordle Leaderboard - {month_name}**\n\n"
+            f"**Wordle Leaderboard - {label}**\n\n"
             f"No qualifying players yet (minimum {MIN_GAMES} games required)."
         )
 
     medals = ["🥇", "🥈", "🥉"]
     lines = [
-        f"**Wordle Leaderboard - {month_name}** 🏆",
+        f"**Wordle Leaderboard - {label}** 🏆",
         f"*Ranked by avg guesses • minimum {MIN_GAMES} games to qualify • X/6 = 7*\n",
     ]
     for i, (name, avg, games) in enumerate(rows, start=1):
@@ -93,11 +121,15 @@ async def on_message(message: discord.Message):
 @bot.command(name="leaderboard")
 @commands.has_permissions(administrator=True)
 async def cmd_leaderboard(ctx, month: str = None):
-    """Post leaderboard for a given month (YYYY-MM). Defaults to last month."""
+    """Post leaderboard. No arg = last 3 months combined. Optional YYYY-MM must be within 3 months."""
+    valid = valid_months_window()
     if month is None:
-        now = datetime.now(UTC)
-        month = (now.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
-    await ctx.send(build_leaderboard_message(month))
+        await ctx.send(build_leaderboard_message(valid))
+    else:
+        if month not in valid:
+            await ctx.send(f"Month `{month}` is outside the allowed window. Valid: {', '.join(valid)}")
+            return
+        await ctx.send(build_leaderboard_message([month]))
 
 
 def is_mod(interaction: discord.Interaction) -> bool:
@@ -107,7 +139,7 @@ def is_mod(interaction: discord.Interaction) -> bool:
 @bot.tree.command(
     name="leaderboard", description="Show the Wordle leaderboard (Program Staff only)"
 )
-@discord.app_commands.describe(month="Month to show (YYYY-MM). Defaults to current month.")
+@discord.app_commands.describe(month="Month to show (YYYY-MM). Defaults to last 3 months combined.")
 async def slash_leaderboard(interaction: discord.Interaction, month: str = None):
     if not is_mod(interaction):
         await interaction.response.send_message(
@@ -119,10 +151,17 @@ async def slash_leaderboard(interaction: discord.Interaction, month: str = None)
             f"This command only works in <#{LEADERBOARD_CHANNEL_ID}>.", ephemeral=True
         )
         return
+    valid = valid_months_window()
     if month is None:
-        now = datetime.now(UTC)
-        month = (now.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
-    await interaction.response.send_message(build_leaderboard_message(month))
+        await interaction.response.send_message(build_leaderboard_message(valid))
+    else:
+        if month not in valid:
+            await interaction.response.send_message(
+                f"Month `{month}` is outside the allowed 3-month window. Valid: {', '.join(valid)}",
+                ephemeral=True,
+            )
+            return
+        await interaction.response.send_message(build_leaderboard_message([month]))
 
 
 @bot.command(name="debug")
@@ -151,14 +190,36 @@ async def cmd_debug(ctx):
 
 @bot.command(name="backfill")
 @commands.has_permissions(administrator=True)
-async def cmd_backfill(ctx, limit: int = 30):
-    """Scan back until <limit> daily summary messages are found and import their scores."""
+async def cmd_backfill(ctx, *month_args: int):
+    """Backfill scores for specific months by number. Usage: !backfill 4 5 (April and May)."""
+    valid = valid_months_window()
+    if not month_args:
+        await ctx.send(
+            f"Usage: `!backfill <month> [month ...]` (month numbers, e.g. `!backfill 4 5`)\n"
+            f"Valid months: {', '.join(valid)}"
+        )
+        return
+
+    target_months = []
+    for num in month_args:
+        ym = month_num_to_year_month(num)
+        if ym is None:
+            await ctx.send(
+                f"Month `{num}` is not within the allowed 3-month window. Valid: {', '.join(valid)}"
+            )
+            return
+        target_months.append(ym)
+
+    target_months = sorted(set(target_months))
+    earliest_ym = target_months[0]
+    month_labels = [datetime.strptime(ym, "%Y-%m").strftime("%B %Y") for ym in target_months]
+
     channel = bot.get_channel(WORDLE_CHANNEL_ID)
     if channel is None:
         await ctx.send("Wordle channel not found. Check WORDLE_CHANNEL_ID.")
         return
 
-    await ctx.send(f"Scanning back for {limit} daily summaries in <#{WORDLE_CHANNEL_ID}>...")
+    await ctx.send(f"Scanning for {', '.join(month_labels)} in <#{WORDLE_CHANNEL_ID}>...")
 
     total = 0
     non_human = 0
@@ -169,6 +230,10 @@ async def cmd_backfill(ctx, limit: int = 30):
 
     async for message in channel.history(limit=None):
         total += 1
+
+        # Stop once we've passed all requested months (history is newest-first)
+        if message.created_at.strftime("%Y-%m") < earliest_ym:
+            break
 
         is_bot = message.author.bot
         is_webhook = bool(message.webhook_id)
@@ -200,6 +265,11 @@ async def cmd_backfill(ctx, limit: int = 30):
         had_yesterday += 1
 
         game_date = message.created_at.date() - timedelta(days=1)
+        game_ym = game_date.strftime("%Y-%m")
+
+        if game_ym not in target_months:
+            continue
+
         mentions_map = {str(m.id): m.display_name for m in message.mentions}
         scores = parse_daily_summary(text, mentions_map)
         lines = [f"--- {game_date} ({message.jump_url}) ---"]
@@ -211,12 +281,10 @@ async def cmd_backfill(ctx, limit: int = 30):
             if add_score(player_id, player_name, guesses, game_date):
                 recorded_total += 1
 
-        if had_yesterday >= limit:
-            break
-
     names_str = ", ".join(f"`{n}`" for n in sorted(all_author_names)) or "none"
     await ctx.send(
         f"**Backfill complete**\n"
+        f"Months: {', '.join(month_labels)}\n"
         f"Total messages scanned: {total}\n"
         f"Non-human (bot/webhook): {non_human}\n"
         f"Matched name `{WORDLE_BOT_NAME}`: {name_matched}\n"
@@ -240,7 +308,7 @@ async def monthly_post():
 
     channel = bot.get_channel(LEADERBOARD_CHANNEL_ID)
     if channel:
-        await channel.send(build_leaderboard_message(year_month))
+        await channel.send(build_leaderboard_message([year_month]))
         mark_posted(year_month)
         print(f"Posted leaderboard for {year_month}")
 

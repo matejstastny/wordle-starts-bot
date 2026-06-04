@@ -39,20 +39,21 @@ def add_score(player_id: str, player_name: str, guesses: int, game_date: date) -
             return False
 
 
-def get_leaderboard(year_month: str, min_games: int = 5, top_n: int = 7) -> list:
-    """Return top_n players for year_month sorted by lowest average guesses."""
+def get_leaderboard(year_months: list[str], min_games: int = 5, top_n: int = 7) -> list:
+    """Return top_n players for the given year_months sorted by lowest average guesses."""
+    placeholders = ",".join("?" * len(year_months))
     with sqlite3.connect(DB_FILE) as conn:
         return conn.execute(
-            """
+            f"""
             SELECT player_name, ROUND(AVG(guesses), 2), COUNT(*)
             FROM scores
-            WHERE year_month = ?
+            WHERE year_month IN ({placeholders})
             GROUP BY player_id
             HAVING COUNT(*) >= ?
             ORDER BY AVG(guesses) ASC
             LIMIT ?
             """,
-            (year_month, min_games, top_n),
+            (*year_months, min_games, top_n),
         ).fetchall()
 
 
