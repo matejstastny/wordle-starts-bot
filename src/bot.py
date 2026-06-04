@@ -151,7 +151,7 @@ async def cmd_debug(ctx):
 
 @bot.command(name="backfill")
 @commands.has_permissions(administrator=True)
-async def cmd_backfill(ctx, limit: int = 1000):
+async def cmd_backfill(ctx, limit: int = 30):
     """Scan the last <limit> messages in #wordle and import historical scores."""
     channel = bot.get_channel(WORDLE_CHANNEL_ID)
     if channel is None:
@@ -202,6 +202,11 @@ async def cmd_backfill(ctx, limit: int = 1000):
         game_date = message.created_at.date() - timedelta(days=1)
         mentions_map = {str(m.id): m.display_name for m in message.mentions}
         scores = parse_daily_summary(text, mentions_map)
+        lines = ["--- DATA ---"]
+        for player_id, player_name, guesses in scores:
+            score = "X/6" if guesses == 7 else f"{guesses}/6"
+            lines.append(f"  {score}  {player_name} (id: {player_id})")
+        print("\n".join(lines))
         for player_id, player_name, guesses in scores:
             if add_score(player_id, player_name, guesses, game_date):
                 recorded_total += 1
