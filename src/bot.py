@@ -202,7 +202,7 @@ async def cmd_backfill(ctx, limit: int = 30):
         game_date = message.created_at.date() - timedelta(days=1)
         mentions_map = {str(m.id): m.display_name for m in message.mentions}
         scores = parse_daily_summary(text, mentions_map)
-        lines = ["--- DATA ---"]
+        lines = [f"--- DATA ({message.jump_url}) ---"]
         for player_id, player_name, guesses in scores:
             score = "X/6" if guesses == 7 else f"{guesses}/6"
             lines.append(f"  {score}  {player_name} (id: {player_id})")
