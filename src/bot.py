@@ -206,7 +206,7 @@ async def cmd_backfill(ctx, limit: int = 30):
         for player_id, player_name, guesses in scores:
             score = "X/6" if guesses == 7 else f"{guesses}/6"
             lines.append(f"  {score}  {player_name} (id: {player_id})")
-        print("\n".join(lines))
+        await ctx.send("\n".join(lines))
         for player_id, player_name, guesses in scores:
             if add_score(player_id, player_name, guesses, game_date):
                 recorded_total += 1
